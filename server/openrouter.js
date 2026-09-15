@@ -33,9 +33,15 @@ const FREE_MODELS = [
 export async function generateMemeTexts(theme, templates) {
   // Standard name on Vercel / .env is OPENROUTER_API_KEY. Older versions of
   // this repo used OPEN_ROUTER_API_KEY — accept both so existing configs work.
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY
+  // Trim: pasting into the Vercel editor can leave a trailing newline, which
+  // OpenRouter rejects with "401 User not found".
+  const rawKey = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY
+  const apiKey = (rawKey || '').trim()
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is missing from the environment')
+  }
+  if (apiKey !== rawKey) {
+    console.warn('[openrouter] OPENROUTER_API_KEY had surrounding whitespace (trimmed before sending)')
   }
 
   const prompt = buildPrompt(theme, templates)
