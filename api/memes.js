@@ -9,12 +9,19 @@
 //  production endpoint for POST /api/memes. The actual work lives in
 //  server/memes-core.js, shared with the local Express server.
 //
-//  Requires the OPEN_ROUTER_API_KEY environment variable to be set on Vercel
+//  Requires the OPENROUTER_API_KEY environment variable to be set on Vercel
 //  (Project → Settings → Environment Variables). .env is gitignored and is
 //  never uploaded, so the key must be configured there too.
 // ─────────────────────────────────────────────────────────────────────────────
 import 'dotenv/config'
 import { createMemes } from '../server/memes-core.js'
+
+// Generating memes calls OpenRouter + memegen.link, which can take a few
+// seconds. Vercel's default function time limit (~10s on Hobby) would cut the
+// request short and surface as a 502 — give the function room to finish.
+export const config = {
+  maxDuration: 60,
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -36,9 +43,12 @@ export default async function handler(req, res) {
   }
 }
 
-// Vercel parses JSON bodies for us, but be tolerant of a raw string body.
+// Vercel parses JSON bodies for us, but be tolerant of a raw string or Buffer
+// body (depending on runtime/builder version).
 function readCategory(req) {
-  const body = typeof req.body === 'string' ? tryParse(req.body) : req.body
+  let body = req.body
+  if (Buffer.isBuffer(body)) body = body.toString()
+  if (typeof body === 'string') body = tryParse(body)
   return body?.category
 }
 

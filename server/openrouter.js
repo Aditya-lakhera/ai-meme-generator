@@ -12,6 +12,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
+// A slow/hung model must not pin the request until Vercel cuts it off (that
+// surfaces as a 502). Abort each call after this many ms and fail over.
+const CALL_TIMEOUT_MS = 15000
+
 // NOTE: OpenRouter's free catalog changes often. If these all 404, run
 // `GET https://openrouter.ai/api/v1/models` and swap in current `:free` ids
 // (or set OPENROUTER_MODEL in .env).
@@ -28,9 +32,11 @@ const FREE_MODELS = [
 
 // templates: [{ id, lines, brief }]  ->  [{ top, bottom }] (one per template)
 export async function generateMemeTexts(theme, templates) {
-  const apiKey = process.env.OPEN_ROUTER_API_KEY
+  // Standard name on Vercel / .env is OPENROUTER_API_KEY. Older versions of
+  // this repo used OPEN_ROUTER_API_KEY — accept both so existing configs work.
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY
   if (!apiKey) {
-    throw new Error('OPEN_ROUTER_API_KEY is missing from .env')
+    throw new Error('OPENROUTER_API_KEY is missing from the environment')
   }
 
   const prompt = buildPrompt(theme, templates)
@@ -104,6 +110,7 @@ async function callModel(apiKey, model, prompt) {
       ],
       temperature: 0.9,
     }),
+    signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
   })
 
   // fetch does NOT throw on 4xx/5xx — check res.ok yourself (Week 1, Slide 22).

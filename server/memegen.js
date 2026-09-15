@@ -41,7 +41,9 @@ let catalogCache = null
 async function getCatalog() {
   if (catalogCache) return catalogCache
   try {
-    const res = await fetch(CATALOG_URL)
+    // Short timeout: the catalog is only a source of variety. If it's slow we
+    // fall back to the hardcoded list instead of letting the request hang.
+    const res = await fetch(CATALOG_URL, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) throw new Error(`catalog responded ${res.status}`)
     const all = await res.json()
     const usable = all
