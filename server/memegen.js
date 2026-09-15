@@ -72,12 +72,21 @@ export async function pickTemplates(count = 5) {
   return picked
 }
 
+// memegen.link hard-rejects any path text segment longer than 200 bytes with
+// HTTP 414. Long lines also wrap/overflow on the image ("not structured"), so
+// cap each line at ~60 chars and truncate the tail if a model overshoots.
+const MAX_LINE_CHARS = 60
+const MAX_SEGMENT_BYTES = 200
+
 // Combines the chosen templates with the model's text into ready-to-show memes.
+// Templates whose text is empty are skipped entirely (a blank meme is worse than
+// a slightly shorter list) — remaining memes stay matched to their template.
 export function buildMemeImages(category, templates, texts) {
-  return templates.map((template, i) => {
+  return templates.flatMap((template, i) => {
     const text = texts[i] ?? { top: '', bottom: '' }
-    const top = (text.top || '').trim()
-    const bottom = (text.bottom || '').trim()
+    const top = cleanLine(text.top)
+    const bottom = cleanLine(text.bottom)
+    if (!top && !bottom) return []
 
     // memegen renders top/bottom as two path segments. 1-line templates use one.
     const path =
@@ -85,19 +94,42 @@ export function buildMemeImages(category, templates, texts) {
         ? `${encodeMemeText(top)}/${encodeMemeText(bottom)}`
         : encodeMemeText(top || bottom || ' ')
 
-    return {
-      id: `${category}-${i}-${Date.now()}`,
-      caption: [top, bottom].filter(Boolean).join(' · '),
-      imageUrl: `${BASE}/${template.id}/${path}.png`,
-    }
+    return [
+      {
+        id: `${category}-${i}-${Date.now()}`,
+        caption: [top, bottom].filter(Boolean).join(' · '),
+        imageUrl: `${BASE}/${template.id}/${path}.png`,
+      },
+    ]
   })
+}
+
+// Collapse whitespace/newlines and bound the raw line length.
+function cleanLine(text) {
+  return String(text || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, MAX_LINE_CHARS)
 }
 
 // memegen.link path-encoding rules (order matters):
 //   _ -> __ , - -> -- , space -> _ , then the special ~x escapes.
+// Single AND double quotes are both written as '' (memegen decodes '' to ').
 function encodeMemeText(text) {
-  return text
-    .trim()
+  let raw = cleanLine(text)
+
+  // Clip down at a word boundary until the encoded segment fits memegen's
+  // hard 200-byte limit (prevents HTTP 414 for very long model output).
+  let encoded = encode(raw)
+  while (Buffer.byteLength(encoded, 'utf8') > MAX_SEGMENT_BYTES && raw.length > 0) {
+    raw = clipToWord(raw)
+    encoded = encode(raw)
+  }
+  return encoded || '_'
+}
+
+function encode(raw) {
+  return raw
     .replace(/_/g, '__')
     .replace(/-/g, '--')
     .replace(/ /g, '_')
@@ -107,5 +139,13 @@ function encodeMemeText(text) {
     .replace(/#/g, '~h')
     .replace(/\//g, '~s')
     .replace(/"/g, "''")
+    .replace(/'/g, "''")
     .replace(/\n/g, '~n')
+}
+
+// Cut at the last space within the current length (word-aware truncation).
+function clipToWord(text) {
+  const cut = text.slice(0, -1)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim()
 }

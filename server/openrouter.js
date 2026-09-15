@@ -77,9 +77,10 @@ function buildPrompt(theme, templates) {
     '- Each meme = ONE specific everyday situation with a clear setup and a punchline.',
     '- Every line must be a COMPLETE, natural Hinglish sentence, like texting a friend.',
     '- The two lines must connect into ONE joke. NEVER write disconnected keywords.',
+    '- top = the setup, bottom = the sharp punchline. For one-line templates use only top.',
     '- Be specific + relatable: padhai, salary, shaadi, cricket, reels, mummy ki daant, EMI.',
     '- Hinglish = Hindi + English in Roman/English letters. Casual spoken tone.',
-    '- Keep each line under ~10 words. No emojis, no hashtags, no quotes, no gaali.',
+    '- Each line: under 8 words, under 60 characters. No emojis, no hashtags, no quotes, no gaali.',
     '',
     'BAD (never do this): "Hero dialogue yaad, public ne mazak udaya"  <- random fragments, no joke.',
     'GOOD (match this coherence + relatability):',
@@ -88,7 +89,7 @@ function buildPrompt(theme, templates) {
     '  Wonka        -> top: "Oh, tumne ek match dekha?"      bottom: "Ab toh tum coach ban gaye"',
     '  This Is Fine (one line): "Exam kal hai aur main abhi bhi reels dekh raha hoon"',
     '',
-    'Now write for these templates, IN ORDER. Fit YOUR situation into each format:',
+    `Now write EXACTLY ${templates.length} memes, one per template, IN THE SAME ORDER:`,
     list,
     '',
     'Reply with ONLY this JSON (bottom = "" for one-line templates):',
@@ -181,5 +182,10 @@ function toMeme(item) {
 }
 
 function normalize(texts, count) {
-  return texts.slice(0, count).filter((t) => t.top || t.bottom)
+  const list = texts.slice(0, count)
+  // Remove only TRAILING empty entries: dropping one from the middle would
+  // shift later memes onto the wrong template. Middle blanks stay in place.
+  let end = list.length
+  while (end > 0 && !(list[end - 1].top || list[end - 1].bottom)) end--
+  return list.slice(0, end)
 }
