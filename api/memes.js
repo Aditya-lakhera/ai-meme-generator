@@ -37,8 +37,10 @@ export default async function handler(req, res) {
     if (status >= 500) {
       console.error('[/api/memes] failed:', err.message)
     }
+    // Include the real reason (missing key, rate limit, unknown model, ...) so
+    // the failing deploy is debuggable straight from the network tab.
     return res.status(status).json({
-      error: status === 400 ? err.message : 'Failed to generate memes',
+      error: status === 400 ? err.message : `Failed to generate memes — ${err.message}`,
     })
   }
 }

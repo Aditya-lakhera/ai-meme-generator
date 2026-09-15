@@ -14,20 +14,19 @@ const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
 // A slow/hung model must not pin the request until Vercel cuts it off (that
 // surfaces as a 502). Abort each call after this many ms and fail over.
-const CALL_TIMEOUT_MS = 15000
+const CALL_TIMEOUT_MS = 30000
 
-// NOTE: OpenRouter's free catalog changes often. If these all 404, run
-// `GET https://openrouter.ai/api/v1/models` and swap in current `:free` ids
-// (or set OPENROUTER_MODEL in .env).
-// Ordered by Hinglish quality (bigger models = more coherent desi humour).
+// NOTE: OpenRouter's free catalog changes often, and free variants are heavily
+// rate-limited (20 req/min, 50 req/day per account). We lead with the env
+// override, then `openrouter/free` (OpenRouter's router — it picks a live free
+// model that supports the request itself), then a small hardcoded tail. Set
+// OPENROUTER_MODEL in .env / Vercel to pin an exact model.
 const FREE_MODELS = [
-  process.env.OPENROUTER_MODEL, // optional override from .env
+  process.env.OPENROUTER_MODEL,
+  'openrouter/free',
   'nvidia/nemotron-3-super-120b-a12b:free',
-  'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-20b:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'nvidia/nemotron-3-nano-30b-a3b:free',
-  'inclusionai/ling-3.0-flash:free',
+  'qwen/qwen3-coder:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
 ].filter(Boolean)
 
 // templates: [{ id, lines, brief }]  ->  [{ top, bottom }] (one per template)
@@ -41,18 +40,23 @@ export async function generateMemeTexts(theme, templates) {
 
   const prompt = buildPrompt(theme, templates)
 
-  let lastError
+  const failures = []
   for (const model of FREE_MODELS) {
     try {
       const texts = await callModel(apiKey, model, prompt)
       if (texts.length >= 1) {
         return normalize(texts, templates.length)
       }
+      failures.push(`model ${model} returned no usable text`)
     } catch (err) {
-      lastError = err
+      failures.push(err.message)
     }
   }
-  throw lastError ?? new Error('No meme text returned by any model')
+  const lastError = new Error(
+    `All OpenRouter attempts failed. ${failures.join('. ')}`,
+  )
+  lastError.status = 502
+  throw lastError
 }
 
 function buildPrompt(theme, templates) {
@@ -91,36 +95,67 @@ function buildPrompt(theme, templates) {
 }
 
 async function callModel(apiKey, model, prompt) {
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a savage desi meme writer who thinks in Hinglish and knows ' +
-            'every classic meme template by heart. You always reply with valid JSON.',
-        },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.9,
-    }),
-    signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-  })
+  let res
+  try {
+    res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        // Recommended by OpenRouter so your app shows up in their rankings.
+        'HTTP-Referer': 'https://ai-meme-generator.vercel.app',
+        'X-Title': 'AI Meme Generator',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a savage desi meme writer who thinks in Hinglish and knows ' +
+              'every classic meme template by heart. You always reply with valid JSON.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.9,
+        max_tokens: 1000,
+      }),
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+    throw new Error(
+      timedOut
+        ? `OpenRouter timed out after ${CALL_TIMEOUT_MS}ms for ${model}`
+        : `OpenRouter request failed for ${model}: ${err.message}`,
+    )
+  }
 
   // fetch does NOT throw on 4xx/5xx — check res.ok yourself (Week 1, Slide 22).
+  // Pull OpenRouter's own error message so the real cause (missing key, rate
+  // limit, 402, unknown model) is visible in logs instead of a bare "502".
   if (!res.ok) {
-    throw new Error(`OpenRouter responded ${res.status} for ${model}`)
+    throw new Error(await openRouterFailure(res, model))
   }
 
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content ?? ''
   return parseMemes(text)
+}
+
+// Best-effort extraction of OpenRouter's error detail for a non-OK response.
+async function openRouterFailure(res, model) {
+  let detail = ''
+  try {
+    const body = await res.json()
+    detail =
+      body?.error?.message ||
+      body?.error?.code ||
+      (typeof body === 'string' ? body : JSON.stringify(body).slice(0, 300))
+  } catch {
+    detail = (await res.text().catch(() => ''))?.slice(0, 300) || 'no details'
+  }
+  return `OpenRouter responded ${res.status} for ${model}: ${detail}`
 }
 
 // Models sometimes wrap JSON in ``` fences or add stray text. Parse leniently.
