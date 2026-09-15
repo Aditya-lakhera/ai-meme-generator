@@ -12,10 +12,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions'
 
-// A slow/hung model must not pin the request until Vercel cuts it off (that
-// surfaces as a 502). Abort each call after this many ms and fail over.
-const CALL_TIMEOUT_MS = 30000
-
 // NOTE: OpenRouter's free catalog changes often, and free variants are heavily
 // rate-limited (20 req/min, 50 req/day per account). We lead with the env
 // override, then `openrouter/free` (OpenRouter's router — it picks a live free
@@ -101,41 +97,30 @@ function buildPrompt(theme, templates) {
 }
 
 async function callModel(apiKey, model, prompt) {
-  let res
-  try {
-    res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        // Recommended by OpenRouter so your app shows up in their rankings.
-        'HTTP-Referer': 'https://ai-meme-generator.vercel.app',
-        'X-Title': 'AI Meme Generator',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a savage desi meme writer who thinks in Hinglish and knows ' +
-              'every classic meme template by heart. You always reply with valid JSON.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.9,
-        max_tokens: 1000,
-      }),
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-    })
-  } catch (err) {
-    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
-    throw new Error(
-      timedOut
-        ? `OpenRouter timed out after ${CALL_TIMEOUT_MS}ms for ${model}`
-        : `OpenRouter request failed for ${model}: ${err.message}`,
-    )
-  }
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      // Recommended by OpenRouter so your app shows up in their rankings.
+      'HTTP-Referer': 'https://ai-meme-generator.vercel.app',
+      'X-Title': 'AI Meme Generator',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a savage desi meme writer who thinks in Hinglish and knows ' +
+            'every classic meme template by heart. You always reply with valid JSON.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.9,
+      max_tokens: 1000,
+    }),
+  })
 
   // fetch does NOT throw on 4xx/5xx — check res.ok yourself (Week 1, Slide 22).
   // Pull OpenRouter's own error message so the real cause (missing key, rate
