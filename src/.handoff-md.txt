@@ -1,0 +1,36 @@
+== OUTCOME ==
+DONE. Modal preview feature fully implemented and verified. Production build passes: `npx tsc` clean, `vite build` succeeded (dist generated).
+VERIFY_METHOD: `npm run build` -> exit 0, "built in 107ms".
+
+== WHAT CHANGED THIS SESSION ==
+1. MemeCard.tsx -> native `<button type="button" class="meme-card">` with
+   aria-label `Open meme: ${caption}` and onOpen(meme) prop. CSS got `appearance: none` reset (src/style.css `.meme-card`).
+2. MemeGallery.tsx -> owns `selected: Meme | null` (useState), maps MemeCard with
+   onOpen=setSelected, conditionally renders `<MemeModal meme={selected} onClose={close}>`.
+3. MemeModal.tsx (new) -> role=dialog, aria-modal, aria-label "Meme preview";
+   backdrop click closes; card stopPropagation; autofocus `×` button
+   (aria-label "Close preview") at -14px corner; uncropped img .modal__img;
+   caption .modal__caption; open link = `a.btn.btn--primary.modal__open`
+   (href imageUrl, target=_blank, rel=noopener noreferrer, text "Open image in new tab").
+   One useEffect: Escape key close + body overflow:hidden; cleanup removes
+   listener + restores overflow.
+4. src/style.css appended: `.modal` fixed backdrop (inset 0, z-100, flex-centered,
+   padding 24, rgba(22,22,15,.72), modal-fade .15s), `.modal__card` (min(560px,100%),
+   max-h 90vh, overflow auto, line/radius/shadow-lg), `.modal__close` 40px
+   highlight circle (-14px/-14px, hover translate(-1,-1), focus-visible accent),
+   `.modal__img` (max-h 62vh, contain, paper bg), `.modal__caption`, `.modal__open`,
+   `@media (max-width:640px)` close -> 8px 8px, and
+   `@media (prefers-reduced-motion: reduce)` global `animation-duration:.001ms!important;
+   transition:none!important`.
+
+== STATE / Files ==
+- src/App.tsx: results-bar + Button(shuffle) + MemeGallery + prefers-reduced-motion covered globally.
+- src/api/memes.ts, src/data/categories.ts, src/types.ts (Meme: id/imageUrl/caption): untouched, correct.
+- Components: Button, CategoryPicker, EmptyState, Header, MemeCard, MemeGallery, MemeModal, Spinner — all final.
+- CSS custom props: --paper/--card/--ink/--muted/--accent/--accent-ink/--highlight/--danger/--line/--shadow-xs/sm/lg/--radius.
+- NOTE: MemeModal's open link is styled by `.btn .btn--primary` (shared Button CSS), `.modal__open` adds the extra modifier; no duplicate primary styles in modal block.
+
+== PENDING / NEXT-SESSION ==
+- (none required; feature complete & green build)
+- Optional polish if requested later: focus trap inside modal, portal to document.body.
+- Remember bash is truth; the Read tool may show stale/alias content for component files.
