@@ -25,7 +25,7 @@ const FREE_MODELS = [
   'meta-llama/llama-3.3-70b-instruct:free',
 ].filter(Boolean)
 
-// templates: [{ id, lines, brief }]  ->  [{ top, bottom }] (one per template)
+// templates: [{ id, name, lines, example }]  ->  [{ top, bottom }] (one per template)
 export async function generateMemeTexts(theme, templates) {
   // Standard name on Vercel / .env is OPENROUTER_API_KEY. Older versions of
   // this repo used OPEN_ROUTER_API_KEY — accept both so existing configs work.
@@ -41,19 +41,46 @@ export async function generateMemeTexts(theme, templates) {
   }
 
   const prompt = buildPrompt(theme, templates)
+  const placeholders = collectPlaceholders(templates)
 
   const failures = []
+  let fallbackTexts = null
+  let fallbackEchoes = Infinity
+
   for (const model of FREE_MODELS) {
     try {
       const texts = await callModel(apiKey, model, prompt)
-      if (texts.length >= 1) {
+      if (texts.length < 1) {
+        failures.push(`model ${model} returned no usable text`)
+        continue
+      }
+      const echoes = countPlaceholderReuse(texts, placeholders)
+      // A single match can be legitimate (some templates, e.g. "one does not
+      // simply", reuse their own catchphrase), so only reject two or more.
+      if (echoes < 2) {
         return normalize(texts, templates.length)
       }
-      failures.push(`model ${model} returned no usable text`)
+      // The model parroted the templates' example captions instead of writing
+      // new jokes. Remember the least-echoing attempt and try another model.
+      if (echoes < fallbackEchoes) {
+        fallbackEchoes = echoes
+        fallbackTexts = texts
+      }
+      failures.push(`model ${model} reused ${echoes} template placeholder line(s)`)
     } catch (err) {
       failures.push(err.message)
     }
   }
+
+  // Every model copied placeholders — showing the least-echoing result still
+  // beats failing the whole request.
+  if (fallbackTexts) {
+    console.warn(
+      `[openrouter] every model echoed template placeholders; using least-echoing result. ${failures.join('. ')}`,
+    )
+    return normalize(fallbackTexts, templates.length)
+  }
+
   const lastError = new Error(
     `All OpenRouter attempts failed. ${failures.join('. ')}`,
   )
@@ -64,9 +91,9 @@ export async function generateMemeTexts(theme, templates) {
 function buildPrompt(theme, templates) {
   const list = templates
     .map((t, i) => {
-      const eg = (t.example || []).filter(Boolean).join('  ->  ') || 'setup -> punchline'
+      const eg = (t.example || []).filter(Boolean).join(' / ') || 'setup / punchline'
       const slots = t.lines === 2 ? 'top + bottom' : 'one line'
-      return `${i + 1}. ${t.name} (${slots}). Its format looks like:  ${eg}`
+      return `${i + 1}. ${t.name} (${slots}). Format placeholder to REPLACE: "${eg}"`
     })
     .join('\n')
 
@@ -82,12 +109,11 @@ function buildPrompt(theme, templates) {
     '- Hinglish = Hindi + English in Roman/English letters. Casual spoken tone.',
     '- Each line: under 8 words, under 60 characters. No emojis, no hashtags, no quotes, no gaali.',
     '',
-    'BAD (never do this): "Hero dialogue yaad, public ne mazak udaya"  <- random fragments, no joke.',
-    'GOOD (match this coherence + relatability):',
-    '  Drake        -> top: "Gym ka membership lena"       bottom: "Ek din jaake sirf photo daalna"',
-    '  Futurama Fry -> top: "Not sure if sach me bhookh hai" bottom: "ya bas bore ho raha hoon"',
-    '  Wonka        -> top: "Oh, tumne ek match dekha?"      bottom: "Ab toh tum coach ban gaye"',
-    '  This Is Fine (one line): "Exam kal hai aur main abhi bhi reels dekh raha hoon"',
+    'CRITICAL — WRITE ORIGINAL TEXT:',
+    `- Every caption must be a BRAND-NEW joke invented for ${theme}.`,
+    '- The "Format placeholder" below is the template\'s own built-in example, not an answer.',
+    '- NEVER copy, reuse, translate or lightly reword any placeholder (or any text above).',
+    '- If a caption repeats a placeholder, the whole answer is wrong.',
     '',
     `Now write EXACTLY ${templates.length} memes, one per template, IN THE SAME ORDER:`,
     list,
@@ -188,4 +214,40 @@ function normalize(texts, count) {
   let end = list.length
   while (end > 0 && !(list[end - 1].top || list[end - 1].bottom)) end--
   return list.slice(0, end)
+}
+
+// Normalised form of the templates' built-in example captions. Models love to
+// parrot these back ("left on unread" / "left on read") instead of inventing a
+// joke, so we keep them around to detect that.
+function collectPlaceholders(templates) {
+  const phrases = []
+  for (const t of templates) {
+    for (const line of t.example || []) {
+      const norm = normaliseLine(line)
+      // Skip very short phrases that a real joke could plausibly contain.
+      if (norm.length >= 8) phrases.push(norm)
+    }
+  }
+  return phrases
+}
+
+// How many output lines merely repeat a template placeholder.
+function countPlaceholderReuse(texts, phrases) {
+  if (!phrases.length) return 0
+  let count = 0
+  for (const { top, bottom } of texts) {
+    for (const line of [top, bottom]) {
+      const norm = normaliseLine(line)
+      if (norm && phrases.some((p) => norm === p || norm.includes(p))) count++
+    }
+  }
+  return count
+}
+
+// Case/punctuation-insensitive comparison key.
+function normaliseLine(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
