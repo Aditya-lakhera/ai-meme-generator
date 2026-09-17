@@ -54,6 +54,11 @@ export async function generateMemeTexts(theme, templates) {
         failures.push(`model ${model} returned no usable text`)
         continue
       }
+      // Reject if the model returned prompt text instead of actual meme captions
+      if (looksLikePromptText(texts, theme)) {
+        failures.push(`model ${model} returned prompt text instead of captions`)
+        continue
+      }
       const echoes = countPlaceholderReuse(texts, placeholders)
       // A single match can be legitimate (some templates, e.g. "one does not
       // simply", reuse their own catchphrase), so only reject two or more.
@@ -118,7 +123,7 @@ function buildPrompt(theme, templates) {
     `Now write EXACTLY ${templates.length} memes, one per template, IN THE SAME ORDER:`,
     list,
     '',
-    'Reply with ONLY this JSON (bottom = "" for one-line templates):',
+    'Reply with ONLY this JSON (bottom = "" for one-line templates) and nothing else:',
     '{"memes":[{"top":"...","bottom":"..."}]}',
   ].join('\n')
 }
@@ -161,7 +166,22 @@ async function callModel(apiKey, model, prompt) {
   return parseMemes(text)
 }
 
-// Best-effort extraction of OpenRouter's error detail for a non-OK response.
+// Check if the parsed meme texts look like prompt text rather than actual captions.
+function looksLikePromptText(texts, theme) {
+  for (const { top, bottom } of texts) {
+    const combined = `${String(top || '').toLowerCase()} ${String(bottom || '').toLowerCase()}`
+    // If caption starts with "write" (the first word of the prompt), it's prompt text
+    if (/^write/.test(combined)) return true
+    // If caption contains unique prompt phrases, it's prompt text
+    if (combined.includes('every caption must be a brand-new joke')) return true
+    if (combined.includes('format placeholder to replace')) return true
+    // If caption is longer than 12 words, it's probably not a meme caption
+    const wordCount = combined.trim().split(/\s+/).length
+    if (wordCount > 12) return true
+  }
+  return false
+}
+
 async function openRouterFailure(res, model) {
   let detail = ''
   try {
