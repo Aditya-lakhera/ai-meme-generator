@@ -20,7 +20,7 @@ import { createMemes } from '../server/memes-core.js'
 // seconds. Vercel's default function time limit (~10s on Hobby) would cut the
 // request short and surface as a 502 — give the function room to finish.
 export const config = {
-  maxDuration: 600,
+  maxDuration: 100, // seconds
 }
 
 export default async function handler(req, res) {
