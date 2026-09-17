@@ -28,7 +28,7 @@ const FREE_MODELS = [
 
 // templates: [{ id, lines, brief }]  ->  [{ top, bottom }] (one per template)
 export async function generateMemeTexts(theme, templates) {
-  const apiKey = process.env.OPEN_ROUTER_API_KEY
+  const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey) {
     throw new Error('OPEN_ROUTER_API_KEY is missing from .env')
   }
