@@ -54,11 +54,6 @@ export async function generateMemeTexts(theme, templates) {
         failures.push(`model ${model} returned no usable text`)
         continue
       }
-      // Reject if the model returned prompt text instead of actual meme captions
-      if (looksLikePromptText(texts, theme)) {
-        failures.push(`model ${model} returned prompt text instead of captions`)
-        continue
-      }
       const echoes = countPlaceholderReuse(texts, placeholders)
       // A single match can be legitimate (some templates, e.g. "one does not
       // simply", reuse their own catchphrase), so only reject two or more.
@@ -164,22 +159,6 @@ async function callModel(apiKey, model, prompt) {
   const data = await res.json()
   const text = data?.choices?.[0]?.message?.content ?? ''
   return parseMemes(text)
-}
-
-// Check if the parsed meme texts look like prompt text rather than actual captions.
-function looksLikePromptText(texts, theme) {
-  for (const { top, bottom } of texts) {
-    const combined = `${String(top || '').toLowerCase()} ${String(bottom || '').toLowerCase()}`
-    // If caption starts with "write" (the first word of the prompt), it's prompt text
-    if (/^write/.test(combined)) return true
-    // If caption contains unique prompt phrases, it's prompt text
-    if (combined.includes('every caption must be a brand-new joke')) return true
-    if (combined.includes('format placeholder to replace')) return true
-    // If caption is longer than 12 words, it's probably not a meme caption
-    const wordCount = combined.trim().split(/\s+/).length
-    if (wordCount > 12) return true
-  }
-  return false
 }
 
 async function openRouterFailure(res, model) {
